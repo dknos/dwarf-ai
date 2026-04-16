@@ -1,0 +1,7 @@
+google-genai>=0.8
+tenacity>=8.0
+watchdog>=4.0
+chromadb>=0.5
+sentence-transformers
+pydantic>=2.0
+pyyaml

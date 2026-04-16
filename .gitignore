@@ -1,0 +1,32 @@
+# Runtime data
+chroma/
+lua/ipc/context/
+lua/ipc/responses/
+lua/ipc/processed/
+lua/ipc/memories/
+lua/ipc/pressure/
+*.log
+logs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+*.egg-info/
+
+# Secrets
+.env
+.env.*
+*.key
+*secret*
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Legends export (large, world-specific)
+legends.xml

@@ -1,0 +1,11 @@
+# dwarf-ai keybindings
+# Copy this file to your DF directory, or append to existing dfhack.init
+
+keybinding add Ctrl+T@dwarfmode/Default dfai/context_writer
+keybinding add Ctrl+T@adventure dfai/context_writer
+keybinding add E@dwarfmode/Default dfai/ui/eavesdrop_view
+keybinding add M@dwarfmode/Default dfai/ui/mayor_briefing
+
+autostart dfai/response_reader
+autostart dfai/event_hooks
+autostart dfai/lod_manager

@@ -1,0 +1,22 @@
+llm:
+  model: gemini-3.1-flash-lite-preview
+  max_workers: 4
+  max_concurrent_llm_calls: 3
+  interactive_timeout_sec: 5.0
+  sliding_window_turns: 4
+
+ipc:
+  context_dir: /home/nemoclaw/dwarf-ai/lua/ipc/context
+  responses_dir: /home/nemoclaw/dwarf-ai/lua/ipc/responses
+  processed_dir: /home/nemoclaw/dwarf-ai/lua/ipc/processed
+  memories_dir: /home/nemoclaw/dwarf-ai/lua/ipc/memories
+  pressure_dir: /home/nemoclaw/dwarf-ai/lua/ipc/pressure
+
+memory:
+  chroma_dir: /home/nemoclaw/dwarf-ai/chroma
+
+high_priority_zones:
+  - tavern
+  - mayor_office
+  - meeting_hall
+  - throne_room
