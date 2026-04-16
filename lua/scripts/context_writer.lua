@@ -11,6 +11,7 @@ local guidm       = require('gui.dwarfmode')
 local dialogs     = require('gui.dialogs')
 local dwarf_state = reqscript('dfai/state/dwarf_state')
 local world_state = reqscript('dfai/state/world_state')
+local chat_view   = reqscript('dfai/ui/chat_view')
 
 local IPC_CONTEXT_DIR = 'C:/dwarf-ai-ipc/context'
 
@@ -93,49 +94,26 @@ local function write_context(ctx)
     return true
 end
 
--- Prompt the user for a message directed at a specific already-extracted state.
--- Used for initial talk() and for "Reply" continuations from response_reader.
-local function prompt_and_send(state, unit)
-    dialogs.showInputPrompt(
-        'Speak to ' .. state.npc_name,
-        'What do you say?',
-        COLOR_WHITE,
-        '',
-        function(text)
-            if not text or text == '' then return end
-            state.interaction_id = uuid()
-            state.type           = 'interactive'
-            state.player_input   = text
-            state.core_memories  = state.core_memories or {}
-
-            local ok_ws, ws = pcall(function() return world_state.scan(unit) end)
-            if ok_ws and ws then
-                state.room_description         = ws.room_description or ''
-                state.interlocutor_description = ws.interlocutor_description or ''
-            else
-                state.room_description         = ''
-                state.interlocutor_description = ''
-            end
-
-            write_context(state)
-        end
-    )
-end
-
--- Continuation hook — called by response_reader when player clicks "Reply".
--- Receives the previous response's data dict so we can find the same unit.
-_G.dfai_continue_talk = function(prev)
-    local uid = prev and prev.unit_id
-    local unit = uid and df.unit.find(uid) or nil
-    if not unit then
-        dfhack.gui.showAnnouncement('That NPC is no longer here.', COLOR_RED, false)
-        return
-    end
+-- Send a single turn: extract state, add player text, write context file.
+local function send_turn(unit, text)
     local state = extract_npc_state(unit)
-    prompt_and_send(state, unit)
+    state.interaction_id = uuid()
+    state.type           = 'interactive'
+    state.player_input   = text
+    state.core_memories  = state.core_memories or {}
+
+    local ok_ws, ws = pcall(function() return world_state.scan(unit) end)
+    if ok_ws and ws then
+        state.room_description         = ws.room_description or ''
+        state.interlocutor_description = ws.interlocutor_description or ''
+    else
+        state.room_description         = ''
+        state.interlocutor_description = ''
+    end
+    write_context(state)
 end
 
--- Main entry point
+-- Main entry point: open the persistent chat panel for the selected NPC.
 local function talk()
     local unit = get_facing_unit()
     if not unit then
@@ -143,8 +121,12 @@ local function talk()
         return
     end
     local state = extract_npc_state(unit)
-    show_thinking(state.npc_name)
-    prompt_and_send(state, unit)
+    local uid = tonumber(unit.id) or 0
+    chat_view.show(uid, state.npc_name, function(text, view)
+        -- Re-resolve unit each turn in case it moved
+        local u = df.unit.find(uid) or unit
+        send_turn(u, text)
+    end)
 end
 
 talk()

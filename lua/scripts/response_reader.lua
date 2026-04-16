@@ -6,9 +6,11 @@
 
 local json    = require('json')
 local dialogs = require('gui.dialogs')
-
--- Forward reference: set by context_writer so we can re-open a conversation turn.
-_G.dfai_continue_talk = _G.dfai_continue_talk or nil
+-- Chat view module (Phase UX). Lazy-load to avoid circular requires.
+local function get_chat_view()
+    local ok, cv = pcall(function() return reqscript('dfai/ui/chat_view') end)
+    return ok and cv or nil
+end
 
 local IPC_RESPONSES_DIR = 'C:/dwarf-ai-ipc/responses'
 local IPC_CONTEXT_DIR   = 'C:/dwarf-ai-ipc/context'
@@ -65,17 +67,17 @@ end
 local function show_dialogue(data)
     local text = data.dialogue or '*...*'
     local name = data.npc_name or 'Unknown'
-    -- Show as a modal popup with a "Reply / Close" choice.
-    -- If user picks Reply, re-open the talk prompt for the same unit.
-    dialogs.showYesNoPrompt(
-        name,
-        text .. '\n\n[Reply to continue, or cancel to close.]',
-        COLOR_WHITE,
-        function()  -- yes = reply
-            if _G.dfai_continue_talk then _G.dfai_continue_talk(data) end
-        end,
-        function() end  -- no = close
-    )
+    local uid  = data.unit_id or -1
+
+    -- Prefer pushing into the active chat panel for the same NPC.
+    local cv = get_chat_view()
+    local active = cv and cv.active and cv.active() or nil
+    if active and active.unit_id == uid then
+        active:pushReply(text)
+        return
+    end
+    -- Fallback: announcement if no panel is open.
+    dfhack.gui.showAnnouncement(name .. ': ' .. text, COLOR_WHITE, true)
 end
 
 local function on_tick()

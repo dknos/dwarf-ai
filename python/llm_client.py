@@ -25,6 +25,44 @@ _TEXT_MODEL = "gemini-3.1-flash-lite-preview"
 # Sliding window: keep last N turns in messages[]; older turns summarized.
 _WINDOW_TURNS = 4
 
+# Flash Lite Preview pricing (USD per million tokens, as of 2026 Q1)
+_COST_IN_PER_M  = 0.10
+_COST_OUT_PER_M = 0.40
+
+# Running session totals (reset on process restart)
+_session_tokens_in  = 0
+_session_tokens_out = 0
+_session_cost_usd   = 0.0
+_session_calls      = 0
+
+
+def get_session_totals() -> dict:
+    return {
+        "calls":     _session_calls,
+        "tokens_in": _session_tokens_in,
+        "tokens_out":_session_tokens_out,
+        "cost_usd":  _session_cost_usd,
+    }
+
+
+def _record_usage(resp, label: str = "dwarf") -> None:
+    """Pull usage_metadata off the Gemini response, log line, update totals."""
+    global _session_tokens_in, _session_tokens_out, _session_cost_usd, _session_calls
+    meta = getattr(resp, "usage_metadata", None)
+    if meta is None:
+        return
+    t_in  = int(getattr(meta, "prompt_token_count", 0) or 0)
+    t_out = int(getattr(meta, "candidates_token_count", 0) or 0)
+    cost  = (t_in / 1_000_000) * _COST_IN_PER_M + (t_out / 1_000_000) * _COST_OUT_PER_M
+    _session_calls      += 1
+    _session_tokens_in  += t_in
+    _session_tokens_out += t_out
+    _session_cost_usd   += cost
+    logger.info(
+        "LLM [%s] tokens=in:%d/out:%d cost=$%.5f | session total: %d calls $%.4f",
+        label, t_in, t_out, cost, _session_calls, _session_cost_usd,
+    )
+
 
 def _build_client() -> genai.Client:
     api_key = os.environ.get("GOOGLE_API_KEY") or _load_env_key()
@@ -107,6 +145,7 @@ def complete(
         contents=contents,
         config=cfg,
     )
+    _record_usage(resp, label="dwarf")
 
     raw = resp.text or "{}"
     try:
@@ -165,4 +204,5 @@ def complete_text(
         contents=contents,
         config=cfg,
     )
+    _record_usage(resp, label="text")
     return (resp.text or "").strip()
