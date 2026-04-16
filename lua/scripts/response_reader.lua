@@ -4,10 +4,14 @@
 -- Passes actions to action_executor.
 -- Graceful degradation: 5s wall-clock timeout on interactive requests.
 
-local json   = require('json')
+local json    = require('json')
+local dialogs = require('gui.dialogs')
 
-local IPC_RESPONSES_DIR = '/home/nemoclaw/dwarf-ai/lua/ipc/responses'
-local IPC_CONTEXT_DIR   = '/home/nemoclaw/dwarf-ai/lua/ipc/context'
+-- Forward reference: set by context_writer so we can re-open a conversation turn.
+_G.dfai_continue_talk = _G.dfai_continue_talk or nil
+
+local IPC_RESPONSES_DIR = 'C:/dwarf-ai-ipc/responses'
+local IPC_CONTEXT_DIR   = 'C:/dwarf-ai-ipc/context'
 local POLL_TICKS        = 30
 local INTERACTIVE_TIMEOUT_SEC = 5.0
 local FALLBACKS = {
@@ -17,7 +21,7 @@ local FALLBACKS = {
 }
 
 local _tick_counter = 0
-local _pending: table = {}  -- interaction_id -> {ts_sent, unit_name, type}
+local _pending = {}  -- interaction_id -> {ts_sent, unit_name, type}
 
 -- Register a pending interactive request so we can timeout it
 local function register_pending(interaction_id, unit_name, req_type)
@@ -61,7 +65,17 @@ end
 local function show_dialogue(data)
     local text = data.dialogue or '*...*'
     local name = data.npc_name or 'Unknown'
-    dfhack.gui.showAnnouncement(name .. ': ' .. text, COLOR_WHITE, true)
+    -- Show as a modal popup with a "Reply / Close" choice.
+    -- If user picks Reply, re-open the talk prompt for the same unit.
+    dialogs.showYesNoPrompt(
+        name,
+        text .. '\n\n[Reply to continue, or cancel to close.]',
+        COLOR_WHITE,
+        function()  -- yes = reply
+            if _G.dfai_continue_talk then _G.dfai_continue_talk(data) end
+        end,
+        function() end  -- no = close
+    )
 end
 
 local function on_tick()
@@ -96,7 +110,7 @@ local function on_tick()
                 -- Pass action to executor
                 if data.action and data.action.type ~= 'none' then
                     local ok, err = pcall(function()
-                        local executor = require('scripts.action_executor')
+                        local executor = reqscript('dfai/action_executor')
                         executor.execute(data.action, data)
                     end)
                     if not ok then
@@ -114,10 +128,11 @@ end
 dfhack.onStateChange = dfhack.onStateChange or {}
 local _orig_tick = dfhack.onStateChange[SC_WORLD_LOADED]
 
--- Use repeat timer via dfhack.timeout
+-- Use repeat timer via dfhack.timeout with 'frames' so it runs in real time
+-- even when game is paused (game ticks only advance unpaused).
 local function start_poll()
     on_tick()
-    dfhack.timeout(POLL_TICKS, 'ticks', start_poll)
+    dfhack.timeout(30, 'frames', start_poll)
 end
 
 start_poll()

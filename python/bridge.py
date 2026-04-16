@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import yaml
-from watchdog.observers import Observer
+from watchdog.observers.polling import PollingObserver as Observer
 from watchdog.events import FileSystemEventHandler, FileCreatedEvent
 
 from context_engine import build_system_prompt, build_spontaneous_prompt, build_d2d_prompt
@@ -128,10 +128,19 @@ class ContextHandler(FileSystemEventHandler):
     def on_created(self, event: FileCreatedEvent) -> None:
         if event.is_directory:
             return
-        path = pathlib.Path(event.src_path)
+        self._ingest(pathlib.Path(event.src_path))
+
+    def on_modified(self, event) -> None:
+        # PollingObserver on /mnt/c may fire modified instead of created
+        if event.is_directory:
+            return
+        self._ingest(pathlib.Path(event.src_path))
+
+    def _ingest(self, path: pathlib.Path) -> None:
         if path.suffix != ".json" or path.stem.startswith("."):
             return
-        # Brief wait for Lua to finish writing
+        if not path.exists():
+            return
         time.sleep(0.05)
         try:
             with open(path, encoding="utf-8") as f:
@@ -143,6 +152,16 @@ class ContextHandler(FileSystemEventHandler):
         ctx["_context_file"] = str(path)
         ctx["_ts_received"] = time.time()
         self._router.submit(ctx, self._handle)
+
+    def scan_existing(self, context_dir: str) -> None:
+        """Pick up any context files written before the bridge started."""
+        d = pathlib.Path(context_dir)
+        if not d.exists():
+            return
+        for p in sorted(d.glob("*.json")):
+            if not p.stem.startswith("."):
+                logger.info("Picking up existing context file: %s", p.name)
+                self._ingest(p)
 
     def _handle(self, ctx: dict) -> None:
         interaction_id = ctx.get("interaction_id", pathlib.Path(ctx["_context_file"]).stem)
@@ -469,6 +488,7 @@ def run(config_path: str = "config.yaml") -> None:
     observer.start()
 
     logger.info("dwarf-ai bridge watching %s", ipc["context_dir"])
+    handler.scan_existing(ipc["context_dir"])
     try:
         while True:
             time.sleep(1)

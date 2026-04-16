@@ -85,8 +85,10 @@ def build_system_prompt(
     lines.append("Respond in character. Keep your reply to 1-4 sentences.")
     lines.append("")
 
-    # 2. Personality facets
-    facets = ctx.get("facets", {})
+    # 2. Personality facets — Lua's json encodes empty tables as [], coerce to {}
+    facets = ctx.get("facets", {}) or {}
+    if isinstance(facets, list):
+        facets = {}
     facet_lines = []
     for key, threshold, text, above in _FACET_RULES:
         val = facets.get(key, 50)
@@ -97,8 +99,10 @@ def build_system_prompt(
         lines.extend(facet_lines)
         lines.append("")
 
-    # 3. Values
-    values = ctx.get("values", {})
+    # 3. Values — same list/dict coercion
+    values = ctx.get("values", {}) or {}
+    if isinstance(values, list):
+        values = {}
     value_lines = []
     for key, threshold, text in _VALUE_RULES:
         if values.get(key, 0) >= threshold:

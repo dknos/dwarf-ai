@@ -1,10 +1,11 @@
 -- action_executor.lua
+--@module = true
 -- Validates and applies JSON action commands from the LLM.
 -- On validation failure: writes a replan context file so the LLM can react.
 
 local json = require('json')
 
-local IPC_CONTEXT_DIR = '/home/nemoclaw/dwarf-ai/lua/ipc/context'
+local IPC_CONTEXT_DIR = 'C:/dwarf-ai-ipc/context'
 
 local function uuid()
     math.randomseed(dfhack.getTickCount() + math.random(99999))
@@ -47,7 +48,7 @@ local function unit_alive(unit_id)
     return ok2 and not dead
 end
 
-local function execute(action, original_data)
+function execute(action, original_data)
     local atype = action.type or 'none'
 
     if atype == 'none' or atype == 'speak' then
@@ -112,4 +113,3 @@ local function execute(action, original_data)
     end
 end
 
-return { execute = execute }

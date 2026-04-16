@@ -6,11 +6,11 @@ llm:
   sliding_window_turns: 4
 
 ipc:
-  context_dir: /home/nemoclaw/dwarf-ai/lua/ipc/context
-  responses_dir: /home/nemoclaw/dwarf-ai/lua/ipc/responses
-  processed_dir: /home/nemoclaw/dwarf-ai/lua/ipc/processed
-  memories_dir: /home/nemoclaw/dwarf-ai/lua/ipc/memories
-  pressure_dir: /home/nemoclaw/dwarf-ai/lua/ipc/pressure
+  context_dir: /mnt/c/dwarf-ai-ipc/context
+  responses_dir: /mnt/c/dwarf-ai-ipc/responses
+  processed_dir: /mnt/c/dwarf-ai-ipc/processed
+  memories_dir: /mnt/c/dwarf-ai-ipc/memories
+  pressure_dir: /mnt/c/dwarf-ai-ipc/pressure
 
 memory:
   chroma_dir: /home/nemoclaw/dwarf-ai/chroma

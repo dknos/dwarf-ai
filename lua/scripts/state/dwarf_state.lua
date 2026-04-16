@@ -1,4 +1,5 @@
 -- dwarf_state.lua
+--@module = true
 -- Canonical NPC state extractor for dwarf-ai Phase 1.
 -- Returns a state table with personality facets, values, emotions,
 -- body wounds, and hunger/thirst/fatigue/alcohol counters.
@@ -9,7 +10,7 @@
 --   local dwarf_state = require('scripts.state.dwarf_state')
 --   local state = dwarf_state.extract(unit)
 
-local M = {}
+local M = _ENV
 
 -- ---------------------------------------------------------------------------
 -- Internal helpers
@@ -244,5 +245,3 @@ end
 
 -- Also export safe_get so other modules can use the same helper
 M.safe_get = safe_get
-
-return M

@@ -1,4 +1,5 @@
 -- world_state.lua
+--@module = true
 -- Phase 1: Rich spatial context + "Theory of You" interlocutor description.
 --
 -- scan(unit)  → { room_description, interlocutor_description }
@@ -10,7 +11,7 @@
 --
 -- All accesses use nil-guards or pcall.
 
-local M = {}
+local M = _ENV
 
 -- ---------------------------------------------------------------------------
 -- Internal helpers
@@ -534,5 +535,3 @@ function M.scan(unit)
         interlocutor_description = inter_desc,
     }
 end
-
-return M

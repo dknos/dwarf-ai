@@ -8,12 +8,11 @@
 local json        = require('json')
 local utils       = require('utils')
 local guidm       = require('gui.dwarfmode')
-local dwarf_state = require('scripts.state.dwarf_state')
-local world_state = require('scripts.state.world_state')
+local dialogs     = require('gui.dialogs')
+local dwarf_state = reqscript('dfai/state/dwarf_state')
+local world_state = reqscript('dfai/state/world_state')
 
-local IPC_CONTEXT_DIR = dfhack.getSavePath() and
-    (dfhack.getSavePath() .. '/dfai/ipc/context') or
-    '/home/nemoclaw/dwarf-ai/lua/ipc/context'
+local IPC_CONTEXT_DIR = 'C:/dwarf-ai-ipc/context'
 
 local function uuid()
     -- Simple UUID-ish from tick + random
@@ -25,14 +24,37 @@ end
 local function get_facing_unit()
     -- Returns the unit the player cursor is on/nearest
     local cursor = guidm.getCursorPos()
-    if not cursor then return nil end
-    for _, unit in ipairs(df.global.world.units.active) do
-        local ok, pos = pcall(function() return unit.pos end)
-        if ok and pos and pos.x == cursor.x and pos.y == cursor.y and pos.z == cursor.z then
-            if unit ~= df.global.world.units.active[0] then -- exclude player
-                return unit
+    local player = df.global.world.units.active[0]
+    local ppos = player and player.pos
+    -- 1. Try current selected unit (works in adventure mode "look" cursor)
+    local sel = dfhack.gui.getSelectedUnit(true)
+    if sel and sel ~= player then return sel end
+    -- 2. Try cursor position
+    if cursor then
+        for _, unit in ipairs(df.global.world.units.active) do
+            local ok, pos = pcall(function() return unit.pos end)
+            if ok and pos and pos.x == cursor.x and pos.y == cursor.y and pos.z == cursor.z then
+                if unit ~= player then return unit end
             end
         end
+    end
+    -- 3. Fall back: nearest adjacent unit to player (within 2 tiles)
+    if ppos then
+        local best, best_dist = nil, 999
+        for _, unit in ipairs(df.global.world.units.active) do
+            if unit ~= player then
+                local ok, p = pcall(function() return unit.pos end)
+                if ok and p and p.z == ppos.z then
+                    local dx = math.abs(p.x - ppos.x)
+                    local dy = math.abs(p.y - ppos.y)
+                    local d = math.max(dx, dy)
+                    if d <= 2 and d < best_dist then
+                        best, best_dist = unit, d
+                    end
+                end
+            end
+        end
+        if best then return best end
     end
     return nil
 end
@@ -71,18 +93,10 @@ local function write_context(ctx)
     return true
 end
 
--- Main entry point — called from keybinding
-local function talk()
-    local unit = get_facing_unit()
-    if not unit then
-        dfhack.gui.showAnnouncement('No NPC nearby to talk to.', COLOR_RED, false)
-        return
-    end
-
-    local state = extract_npc_state(unit)
-    show_thinking(state.npc_name)
-
-    dfhack.gui.showInputPrompt(
+-- Prompt the user for a message directed at a specific already-extracted state.
+-- Used for initial talk() and for "Reply" continuations from response_reader.
+local function prompt_and_send(state, unit)
+    dialogs.showInputPrompt(
         'Speak to ' .. state.npc_name,
         'What do you say?',
         COLOR_WHITE,
@@ -92,9 +106,8 @@ local function talk()
             state.interaction_id = uuid()
             state.type           = 'interactive'
             state.player_input   = text
-            state.core_memories  = {}
+            state.core_memories  = state.core_memories or {}
 
-            -- Phase 1: populate spatial context
             local ok_ws, ws = pcall(function() return world_state.scan(unit) end)
             if ok_ws and ws then
                 state.room_description         = ws.room_description or ''
@@ -109,9 +122,29 @@ local function talk()
     )
 end
 
--- Keybinding registration
-if dfhack.gui then
-    dfhack.enablePlugin('hotkeys')
+-- Continuation hook — called by response_reader when player clicks "Reply".
+-- Receives the previous response's data dict so we can find the same unit.
+_G.dfai_continue_talk = function(prev)
+    local uid = prev and prev.unit_id
+    local unit = uid and df.unit.find(uid) or nil
+    if not unit then
+        dfhack.gui.showAnnouncement('That NPC is no longer here.', COLOR_RED, false)
+        return
+    end
+    local state = extract_npc_state(unit)
+    prompt_and_send(state, unit)
 end
 
-talk()   -- can also be called directly: script runs talk() on load
+-- Main entry point
+local function talk()
+    local unit = get_facing_unit()
+    if not unit then
+        dfhack.gui.showAnnouncement('No NPC nearby to talk to.', COLOR_RED, false)
+        return
+    end
+    local state = extract_npc_state(unit)
+    show_thinking(state.npc_name)
+    prompt_and_send(state, unit)
+end
+
+talk()

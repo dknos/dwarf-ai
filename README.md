@@ -2,13 +2,18 @@
 
 LLM-driven NPC intelligence for **Dwarf Fortress** (Steam 50.x+) via **DFHack**. Every dwarf is a stateful agent with asymmetric knowledge, episodic memory, and autonomous behavior. The game process is unmodified — all intelligence runs in a Python sidecar.
 
+![Input prompt: asking an NPC a question](docs/01-prompt.png)
+![NPC reply: Elf bowyer on wealth and the tools of his craft](docs/02-reply.png)
+
 ## What it does
 
 | Key | Feature |
 |---|---|
-| **Ctrl+T** | Talk to any NPC — personality, wounds, spatial context fed to LLM |
+| **F9** | Talk to any NPC — personality, wounds, spatial context fed to LLM |
 | **E** | Eavesdrop on nearby dwarf-to-dwarf tavern conversations |
 | **M** | Mayor's briefing — fortress mood report from the expedition leader |
+
+Conversation flows in one chained modal — prompt → reply → "Reply/Close" → next turn, without dropping back to DFHack's launcher.
 
 **Background systems:**
 - Per-dwarf ChromaDB episodic memory — dwarves remember their lives
