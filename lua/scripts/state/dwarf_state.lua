@@ -41,7 +41,14 @@ end
 -- ---------------------------------------------------------------------------
 
 local function resolve_name(unit)
-    -- Prefer historical figure name (has epithets)
+    -- 1. DFHack's canonical readable name — handles historical figures,
+    --    translation, epithets, profession-prefixed names, etc.
+    local ok_rn, rn = pcall(function()
+        return dfhack.units.getReadableName(unit)
+    end)
+    if ok_rn and rn and rn ~= '' then return rn end
+
+    -- 2. Historical figure translated name
     local ok_hf, hfig = pcall(function()
         return df.historical_figure.find(unit.hist_figure_id)
     end)
@@ -50,12 +57,34 @@ local function resolve_name(unit)
             return dfhack.TranslateName(hfig.name, true)
         end)
         if ok_n and name and name ~= '' then return name end
+        -- native (dwarvish) name
+        local ok_nn, nn = pcall(function()
+            return dfhack.TranslateName(hfig.name, false)
+        end)
+        if ok_nn and nn and nn ~= '' then return nn end
     end
-    -- Fall back to unit name
+
+    -- 3. Unit name translated / native
     local ok_n2, n2 = pcall(function()
         return dfhack.TranslateName(unit.name, true)
     end)
     if ok_n2 and n2 and n2 ~= '' then return n2 end
+    local ok_n3, n3 = pcall(function()
+        return dfhack.TranslateName(unit.name, false)
+    end)
+    if ok_n3 and n3 and n3 ~= '' then return n3 end
+
+    -- 4. Profession + race fallback
+    local ok_prof, prof = pcall(function()
+        local p = df['profession'][unit.profession] or ''
+        return tostring(p):lower():gsub('_', ' ')
+    end)
+    local ok_race, rr = pcall(function()
+        return df.creature_raw.find(unit.race).name[0]
+    end)
+    if ok_prof and ok_race and prof ~= '' and rr then
+        return rr:gsub("^%l", string.upper) .. ' ' .. prof
+    end
     return 'Unknown'
 end
 

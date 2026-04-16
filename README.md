@@ -7,13 +7,43 @@ LLM-driven NPC intelligence for **Dwarf Fortress** (Steam 50.x+) via **DFHack**.
 
 ## What it does
 
-| Key | Feature |
+| Key / UI | Feature |
 |---|---|
-| **F9** | Talk to any NPC — personality, wounds, spatial context fed to LLM |
+| **F9** / click **"Speak freely (AI)"** button | Talk to any NPC — personality, wounds, spatial context fed to LLM |
 | **E** | Eavesdrop on nearby dwarf-to-dwarf tavern conversations |
 | **M** | Mayor's briefing — fortress mood report from the expedition leader |
 
-Conversation flows in one chained modal — prompt → reply → "Reply/Close" → next turn, without dropping back to DFHack's launcher.
+The "Speak freely (AI)" button is injected as an overlay into:
+- fortress-mode unit sheets (right-click dwarf → View)
+- adventure-mode unit interaction panels
+- DF's built-in conversation screen (alongside the canned options)
+
+Chat opens as a persistent panel with scrolling transcript. Enter to send, Esc to close, PgUp/PgDn to scroll.
+
+### Words carry real consequences
+
+Every reply returns a structured action that actually fires in-game:
+
+| Action | Effect |
+|---|---|
+| `initiate_brawl` | NPC flips hostile + teleports adjacent → combat starts |
+| `call_guards` | Red shout-for-help announcement |
+| `issue_threat` | Threat text shown + persisted as a strong memory |
+| `demand_payment` | Amount + reason announced |
+| `offer_quest` | Quest announcement with title/objective/reward |
+| `modify_mood` | Actual stress delta to the dwarf |
+| `flee` | Retreat flag set |
+| `opinion_delta` | Per-NPC reputation score persisted to disk |
+
+The prompt explicitly tells Gemini: *if you say you'll fight, return `initiate_brawl`; words and action must match.* Threats aren't just flavor text — rob a shopkeeper and they'll actually attack you, call the guards, or remember the threat forever.
+
+### Persistent memory
+
+Every conversation turn is written to the NPC's ChromaDB collection. Opinions persist across bridge restarts in `chroma/opinions.json`. Come back tomorrow and the same NPC will remember what you said and how they felt about it.
+
+### Token / cost telemetry
+
+Every LLM call logs token counts and cost, plus a running session total. A 30-turn Adventure-Mode conversation with Gemini 3.1 Flash Lite Preview typically runs under $0.001.
 
 **Background systems:**
 - Per-dwarf ChromaDB episodic memory — dwarves remember their lives

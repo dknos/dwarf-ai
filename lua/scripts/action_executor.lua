@@ -66,14 +66,61 @@ function execute(action, original_data)
                 'You moved to attack but your target is no longer there.')
             return
         end
-        -- Apply: set unit to brawl order (DFHack job injection)
+        -- Flip NPC to hostile toward the player and teleport adjacent.
         local ok, err = pcall(function()
             local instigator = df.unit.find(action.instigator_id)
-            dfhack.units.teleport(instigator, df.unit.find(action.target_id).pos)
+            local target     = df.unit.find(action.target_id)
+            if instigator and target then
+                -- Mark NPC hostile; in both fort + adventure mode this triggers
+                -- combat AI toward enemies of the NPC's civ.
+                instigator.flags1.active_invader = true
+                instigator.flags2.visitor        = false
+                instigator.flags2.visitor_uninvited = true
+                -- Teleport adjacent to target so they don't have to pathfind
+                -- across a fortress to reach the player.
+                dfhack.units.teleport(instigator, target.pos)
+                dfhack.gui.showAnnouncement(
+                    (original_data.npc_name or 'A dwarf') .. ' attacks!',
+                    COLOR_RED, true
+                )
+            end
         end)
         if not ok then
             write_replan(original_data, 'Could not initiate brawl: ' .. tostring(err))
         end
+
+    elseif atype == 'call_guards' then
+        local reason = action.reason or 'a disturbance'
+        dfhack.gui.showAnnouncement(
+            (original_data.npc_name or 'Someone') .. ' shouts for the guard: "' .. reason .. '!"',
+            COLOR_LIGHTRED, true
+        )
+
+    elseif atype == 'issue_threat' then
+        local threat = action.threat or 'Consequences will follow.'
+        dfhack.gui.showAnnouncement(
+            (original_data.npc_name or 'Someone') .. ' warns: "' .. threat .. '"',
+            COLOR_YELLOW, true
+        )
+
+    elseif atype == 'demand_payment' then
+        local amt    = action.amount or 0
+        local reason = action.reason or ''
+        dfhack.gui.showAnnouncement(
+            (original_data.npc_name or 'Someone') .. ' demands '
+                .. tostring(amt) .. ' coins — ' .. reason,
+            COLOR_YELLOW, true
+        )
+
+    elseif atype == 'offer_quest' then
+        local title     = action.title or 'An errand'
+        local objective = action.objective or ''
+        local reward    = action.reward or ''
+        dfhack.gui.showAnnouncement(
+            '[Quest] ' .. (original_data.npc_name or 'Someone') .. ' offers: '
+                .. title .. ' -- ' .. objective .. ' (reward: ' .. reward .. ')',
+            COLOR_LIGHTCYAN, true
+        )
 
     elseif atype == 'flee' then
         if not unit_alive(action.unit_id) then return end

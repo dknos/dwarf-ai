@@ -46,6 +46,29 @@ class OpinionDeltaAction(BaseModel):
     reason: str = Field(description="Brief note on why (one short sentence) — used as a memory hook.")
 
 
+class CallGuardsAction(BaseModel):
+    type: Literal["call_guards"]
+    reason: str = Field(description="Why you're calling for help (crime witnessed, threat, etc.)")
+
+
+class IssueThreatAction(BaseModel):
+    type: Literal["issue_threat"]
+    threat: str = Field(description="Exactly what you threatened to do if the player continues.")
+
+
+class DemandPaymentAction(BaseModel):
+    type: Literal["demand_payment"]
+    amount: int = Field(description="Coins demanded, 1-10000")
+    reason: str = Field(description="Why payment is owed — unpaid debt, bribe, ransom, tax")
+
+
+class OfferQuestAction(BaseModel):
+    type: Literal["offer_quest"]
+    title: str = Field(description="Short quest title (5-10 words)")
+    objective: str = Field(description="What the player needs to do")
+    reward: str = Field(description="What the NPC offers in exchange")
+
+
 class NoAction(BaseModel):
     type: Literal["none"]
 
@@ -58,6 +81,10 @@ AnyAction = Union[
     FleeAction,
     ModifyMoodAction,
     OpinionDeltaAction,
+    CallGuardsAction,
+    IssueThreatAction,
+    DemandPaymentAction,
+    OfferQuestAction,
     NoAction,
 ]
 

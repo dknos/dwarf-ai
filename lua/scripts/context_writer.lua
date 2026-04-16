@@ -72,14 +72,28 @@ local function show_thinking(unit_name)
     )
 end
 
+-- Strip non-ASCII bytes from strings so JSON is always valid UTF-8.
+-- DFHack's TranslateName can return CP437 characters that aren't valid UTF-8.
+local function sanitize(v)
+    if type(v) == 'string' then
+        -- Replace any byte >= 0x80 with '?' to keep output ASCII-safe.
+        return (v:gsub('[\128-\255]', '?'))
+    elseif type(v) == 'table' then
+        local out = {}
+        for k, vv in pairs(v) do out[k] = sanitize(vv) end
+        return out
+    end
+    return v
+end
+
 local function write_context(ctx)
     local dir = IPC_CONTEXT_DIR
-    -- Ensure dir exists (DFHack can't mkdir -p, try dfhack.filesystem)
     if dfhack.filesystem and dfhack.filesystem.mkdir then
         pcall(function() dfhack.filesystem.mkdir_recursive(dir) end)
     end
     local path = dir .. '/' .. ctx.interaction_id .. '.json'
-    local ok_enc, encoded = pcall(function() return json.encode(ctx) end)
+    local safe = sanitize(ctx)
+    local ok_enc, encoded = pcall(function() return json.encode(safe) end)
     if not ok_enc then
         dfhack.printerr('[dfai] json encode failed: ' .. tostring(encoded))
         return false

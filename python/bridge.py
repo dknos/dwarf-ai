@@ -181,13 +181,19 @@ class ContextHandler(FileSystemEventHandler):
     def on_created(self, event: FileCreatedEvent) -> None:
         if event.is_directory:
             return
-        self._ingest(pathlib.Path(event.src_path))
+        try:
+            self._ingest(pathlib.Path(event.src_path))
+        except Exception as exc:  # never let the observer thread die
+            logger.error("on_created error: %s", exc, exc_info=True)
 
     def on_modified(self, event) -> None:
         # PollingObserver on /mnt/c may fire modified instead of created
         if event.is_directory:
             return
-        self._ingest(pathlib.Path(event.src_path))
+        try:
+            self._ingest(pathlib.Path(event.src_path))
+        except Exception as exc:
+            logger.error("on_modified error: %s", exc, exc_info=True)
 
     def _ingest(self, path: pathlib.Path) -> None:
         if path.suffix != ".json" or path.stem.startswith("."):
@@ -196,10 +202,16 @@ class ContextHandler(FileSystemEventHandler):
             return
         time.sleep(0.05)
         try:
-            with open(path, encoding="utf-8") as f:
+            # DF name translation can emit CP437 bytes; decode tolerantly.
+            with open(path, encoding="utf-8", errors="replace") as f:
                 ctx = json.load(f)
-        except (json.JSONDecodeError, OSError) as exc:
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
             logger.warning("Could not read context %s: %s", path.name, exc)
+            # Move bad file out of the watch dir so it doesn't loop
+            try:
+                path.rename(pathlib.Path(self._ipc["processed_dir"]) / ("BAD_" + path.name))
+            except OSError:
+                pass
             return
 
         ctx["_context_file"] = str(path)
