@@ -8,9 +8,8 @@
 
 local json = require('json')
 
-local IPC_CONTEXT_DIR = dfhack.getSavePath and dfhack.getSavePath() and
-    (dfhack.getSavePath() .. '/dfai/ipc/context') or
-    '/home/nemoclaw/dwarf-ai/lua/ipc/context'
+local IPC_CONTEXT_DIR = 'C:/dwarf-ai-ipc/context'
+local dwarf_state     = reqscript('dfai/state/dwarf_state')
 
 -- ---------------------------------------------------------------------------
 -- Helpers (mirrors context_writer.lua patterns)
@@ -104,6 +103,44 @@ local function emit_memory_event(unit_id, event_text, emotional_weight)
         .. ' ew=' .. tostring(emotional_weight) .. '\n')
 end
 
+-- Sanitize non-ASCII bytes so JSON stays valid UTF-8.
+local function sanitize(v)
+    if type(v) == 'string' then return (v:gsub('[\128-\255]', '?'))
+    elseif type(v) == 'table' then
+        local out = {}
+        for k, vv in pairs(v) do out[k] = sanitize(vv) end
+        return out
+    end
+    return v
+end
+
+-- Fire a full spontaneous "you just witnessed a murder" context. The LLM
+-- decides whether to flee / call guards / attack the player based on the
+-- witness's personality, values, and courage.
+local function emit_witness_reaction(witness, victim_name, location)
+    local ok_state, state = pcall(function() return dwarf_state.extract(witness) end)
+    if not ok_state or not state then return end
+
+    state.interaction_id  = 'witness-' .. uuid()
+    state.type            = 'spontaneous'
+    state.pressure_type   = 'witnessed_murder'
+    state.pressure_level  = 90
+    state.player_input    = ''
+    state.system_note     =
+        'You just saw the player kill ' .. (victim_name or 'someone') ..
+        ' at ' .. (location or 'here') ..
+        '. Their body is at your feet. What do you do RIGHT NOW? ' ..
+        'Your personality, values, and courage decide: flee, scream for guards, ' ..
+        'or attack the killer. Do NOT stand silently. Pick an action that matches your character.'
+    state.room_description = ''
+    state.interlocutor_description = 'The player is standing over the body.'
+    state.core_memories = {}
+
+    local safe = sanitize(state)
+    write_memory_event(safe)  -- reuse the atomic writer
+    dfhack.print('[dfai] witness_reaction unit=' .. tostring(state.unit_id) .. '\n')
+end
+
 -- ---------------------------------------------------------------------------
 -- Witness detection: find dwarves near a position who would witness an event
 -- ---------------------------------------------------------------------------
@@ -173,14 +210,38 @@ local function check_unit_deaths()
 
                 -- Emit for all nearby witnesses
                 if ok_pos and pos then
+                    -- Is the player nearby? If yes, they are likely the killer.
+                    local player_pos
+                    local ok_pp = pcall(function()
+                        local p = df.global.world.units.active[0]
+                        if p then player_pos = p.pos end
+                    end)
+                    local player_near = false
+                    if ok_pp and player_pos and player_pos.z == pos.z then
+                        local dx = math.abs(player_pos.x - pos.x)
+                        local dy = math.abs(player_pos.y - pos.y)
+                        if math.max(dx, dy) <= 5 then player_near = true end
+                    end
+
                     local witnesses = get_nearby_dwarves(pos, 10)
                     for _, witness in ipairs(witnesses) do
                         local ok_wid, wid = pcall(function() return witness.id end)
                         if ok_wid and wid and wid ~= uid then
                             local wname = unit_name(witness)
-                            local witness_text = wname .. ' witnessed ' .. dead_name
-                                .. ' die from ' .. cause .. ' at ' .. loc .. '.'
-                            emit_memory_event(wid, witness_text, 75)
+                            local witness_text
+                            if player_near then
+                                witness_text = wname .. ' saw the player strike down '
+                                    .. dead_name .. ' at ' .. loc .. '.'
+                            else
+                                witness_text = wname .. ' witnessed ' .. dead_name
+                                    .. ' die from ' .. cause .. ' at ' .. loc .. '.'
+                            end
+                            emit_memory_event(wid, witness_text, 90)
+
+                            -- If the player was involved, fire a reaction request.
+                            if player_near then
+                                emit_witness_reaction(witness, dead_name, loc)
+                            end
                         end
                     end
                 end

@@ -191,12 +191,15 @@ def build_system_prompt(
     # 9. Theory of You — who the player character is  (from world_state.lua)
     interlocutor = ctx.get("interlocutor_description", "")
     opinion_text = ctx.get("player_opinion_text", "")
-    if interlocutor or opinion_text:
+    town_rep_text = ctx.get("town_reputation_text", "")
+    if interlocutor or opinion_text or town_rep_text:
         lines.append("## Who You Are Speaking To")
         if interlocutor:
             lines.append(interlocutor)
         if opinion_text:
             lines.append(opinion_text)
+        if town_rep_text:
+            lines.append(town_rep_text)
         lines.append("")
 
     # 10. System note — injected by action_executor for replan contexts,

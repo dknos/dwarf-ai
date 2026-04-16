@@ -13,30 +13,27 @@ class SpeakAction(BaseModel):
 
 
 class InitiateBrawlAction(BaseModel):
+    """You physically attack the player right now. No IDs needed — you are the attacker, they are the target."""
     type: Literal["initiate_brawl"]
-    instigator_id: int
-    target_id: int
+    intensity: Literal["shove", "strike", "kill"] = Field(default="strike", description="shove = push/warn, strike = punch/draw weapon, kill = lethal intent")
 
 
 class RequestMeetingAction(BaseModel):
     type: Literal["request_meeting"]
-    requester_id: int
 
 
 class PublicRantAction(BaseModel):
     type: Literal["public_rant"]
-    unit_id: int
     topic: str
 
 
 class FleeAction(BaseModel):
+    """You run away from the player in fear."""
     type: Literal["flee"]
-    unit_id: int
 
 
 class ModifyMoodAction(BaseModel):
     type: Literal["modify_mood"]
-    unit_id: int
     stress_delta: int = Field(description="Positive = more stress, negative = relief. Max abs 1000. Use when the conversation was genuinely upsetting or comforting.")
 
 

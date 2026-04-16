@@ -33,6 +33,7 @@ from llm_client import complete
 from memory.episodic import EpisodicMemory
 from memory.consolidator import SleepConsolidator
 from memory.pressure import PressureEngine
+from town_reputation import TownReputation
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +128,8 @@ class ContextHandler(FileSystemEventHandler):
         # Lasting per-NPC opinion of the player (persistent across bridge restarts)
         self._opinion_path = pathlib.Path(chroma_dir) / "opinions.json"
         self._opinions: dict[int, int] = self._load_opinions()
+        # Town-level reputation score (persistent)
+        self._town_rep = TownReputation(str(pathlib.Path(chroma_dir) / "town_reputation.json"))
 
     def _load_opinions(self) -> dict[int, int]:
         try:
@@ -288,6 +291,12 @@ class ContextHandler(FileSystemEventHandler):
         ctx["player_opinion"] = opinion
         ctx["player_opinion_text"] = self._opinion_to_text(opinion)
 
+        # Inject town-level reputation — the whole town gossips.
+        site = ctx.get("site_name") or ctx.get("location") or "unknown"
+        town_rep = self._town_rep.get(site)
+        ctx["town_reputation"] = town_rep
+        ctx["town_reputation_text"] = TownReputation.to_text(town_rep)
+
         # Inject relevant memories into context before building the prompt
         try:
             relevant = self._episodic.query(unit_id, player_input, top_k=3)
@@ -332,10 +341,20 @@ class ContextHandler(FileSystemEventHandler):
 
             # Apply opinion_delta if the model emitted one.
             act = response.action.model_dump() if response.action else {"type": "none"}
-            if act.get("type") == "opinion_delta":
+            act_type = act.get("type", "none")
+            if act_type == "opinion_delta":
                 delta  = int(act.get("delta", 0) or 0)
                 reason = str(act.get("reason", ""))
                 self._apply_opinion_delta(unit_id, delta, reason)
+            # Every hostile / alarming action adjusts town reputation.
+            try:
+                self._town_rep.apply_action(
+                    site=site,
+                    action_type=act_type,
+                    reason=response.dialogue[:60] if response.dialogue else "",
+                )
+            except Exception as exc:
+                logger.warning("town_rep update failed: %s", exc)
 
         # Write response file
         responses_dir = pathlib.Path(self._ipc["responses_dir"])
@@ -349,8 +368,11 @@ class ContextHandler(FileSystemEventHandler):
             "timestamp": _now_iso(),
         }
         _atomic_write(responses_dir / f"{interaction_id}.json", out)
-        logger.info("[%s] dialogue written for unit=%s opinion=%+d",
-                    interaction_id[:8], unit_id, self._get_opinion(unit_id))
+        logger.info("[%s] unit=%s action=%s opinion=%+d  said: %r",
+                    interaction_id[:8], unit_id,
+                    out["action"].get("type", "?"),
+                    self._get_opinion(unit_id),
+                    (response.dialogue if response else "")[:80])
 
         self._archive(ctx)
 

@@ -25,9 +25,14 @@ end
 local function get_facing_unit()
     -- Returns the unit the player cursor is on/nearest
     local cursor = guidm.getCursorPos()
-    local player = df.global.world.units.active[0]
+    local ok_adv, adv = pcall(function() return dfhack.world.getAdventurer() end)
+    local player = (ok_adv and adv) or df.global.world.units.active[0]
     local ppos = player and player.pos
-    -- 1. Try current selected unit (works in adventure mode "look" cursor)
+    if not ppos then
+        dfhack.gui.showAnnouncement('[dfai] No player unit position — are you on the world map?',
+            COLOR_YELLOW, false)
+    end
+    -- 1. Try current selected unit (works when a unit sheet is open)
     local sel = dfhack.gui.getSelectedUnit(true)
     if sel and sel ~= player then return sel end
     -- 2. Try cursor position
@@ -39,23 +44,48 @@ local function get_facing_unit()
             end
         end
     end
-    -- 3. Fall back: nearest adjacent unit to player (within 2 tiles)
+    -- 3. Fall back: nearest living NPC to player (any z, within 30 tiles)
     if ppos then
-        local best, best_dist = nil, 999
+        local best, best_dist = nil, 9999
+        local closest_any, closest_dist = nil, 9999
         for _, unit in ipairs(df.global.world.units.active) do
             if unit ~= player then
                 local ok, p = pcall(function() return unit.pos end)
-                if ok and p and p.z == ppos.z then
+                local ok_dead, dead = pcall(function() return unit.flags1.dead end)
+                if ok and p then
+                    -- 3D Chebyshev distance: z weighted heavier since stairs
                     local dx = math.abs(p.x - ppos.x)
                     local dy = math.abs(p.y - ppos.y)
-                    local d = math.max(dx, dy)
-                    if d <= 2 and d < best_dist then
+                    local dz = math.abs(p.z - ppos.z) * 3
+                    local d  = math.max(dx, dy) + dz
+                    if not (ok_dead and dead) and d <= 30 and d < best_dist then
                         best, best_dist = unit, d
+                    end
+                    if d < closest_dist then
+                        closest_any, closest_dist = unit, d
                     end
                 end
             end
         end
-        if best then return best end
+        if best then
+            dfhack.gui.showAnnouncement('[dfai] Found NPC at dist ' .. best_dist, COLOR_GREEN, false)
+            return best
+        end
+        -- Report what we DID see so we can diagnose
+        if closest_any then
+            local cn = pcall(function() return closest_any.name end) and
+                dfhack.TranslateName(closest_any.name, true) or '?'
+            local cp = closest_any.pos
+            dfhack.gui.showAnnouncement(
+                '[dfai] closest unit ' .. tostring(cn) .. ' at ' ..
+                'dx=' .. (cp.x - ppos.x) .. ' dy=' .. (cp.y - ppos.y) ..
+                ' dz=' .. (cp.z - ppos.z) .. ' dead=' ..
+                tostring(closest_any.flags1.dead),
+                COLOR_YELLOW, false)
+        else
+            dfhack.gui.showAnnouncement('[dfai] No other units in units.active at all.',
+                COLOR_RED, false)
+        end
     end
     return nil
 end

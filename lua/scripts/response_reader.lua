@@ -69,15 +69,16 @@ local function show_dialogue(data)
     local name = data.npc_name or 'Unknown'
     local uid  = data.unit_id or -1
 
-    -- Prefer pushing into the active chat panel for the same NPC.
+    -- Always fire an announcement so the player never misses a reply.
+    dfhack.gui.showAnnouncement(name .. ': ' .. text, COLOR_WHITE, true)
+
+    -- Also push into the active chat panel if one matches.
     local cv = get_chat_view()
     local active = cv and cv.active and cv.active() or nil
-    if active and active.unit_id == uid then
-        active:pushReply(text)
-        return
+    local ok_uid = active and pcall(function() return active.unit_id end) and active.unit_id
+    if active and (ok_uid == uid or ok_uid == nil) then
+        pcall(function() active:pushReply(text) end)
     end
-    -- Fallback: announcement if no panel is open.
-    dfhack.gui.showAnnouncement(name .. ': ' .. text, COLOR_WHITE, true)
 end
 
 local function on_tick()

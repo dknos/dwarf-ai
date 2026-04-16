@@ -48,46 +48,112 @@ local function unit_alive(unit_id)
     return ok2 and not dead
 end
 
+-- Always-resolve helpers — instigator = the NPC this conversation is with,
+-- target = the player character. No LLM-provided IDs needed.
+local function get_npc_unit(original_data)
+    local uid = original_data and original_data.unit_id
+    if uid then
+        local ok, u = pcall(function() return df.unit.find(uid) end)
+        if ok and u then return u end
+    end
+    return nil
+end
+
+local function get_player_unit()
+    -- Canonical: dfhack.world.getAdventurer() works in adventure mode.
+    local ok, u = pcall(function() return dfhack.world.getAdventurer() end)
+    if ok and u then return u end
+    -- Fallback for fort mode: no player; use units.active[0]
+    local ok2, u2 = pcall(function() return df.global.world.units.active[0] end)
+    return ok2 and u2 or nil
+end
+
 function execute(action, original_data)
     local atype = action.type or 'none'
 
     if atype == 'none' or atype == 'speak' then
-        -- speak is handled by show_dialogue in response_reader
         return
 
     elseif atype == 'initiate_brawl' then
-        if not unit_alive(action.instigator_id) then
+        local npc    = get_npc_unit(original_data)
+        local player = get_player_unit()
+        if not npc or not player then
             write_replan(original_data,
-                'You tried to start a brawl but the instigator no longer exists.')
+                'The one you wished to strike is no longer in the world.')
             return
         end
-        if not unit_alive(action.target_id) then
-            write_replan(original_data,
-                'You moved to attack but your target is no longer there.')
-            return
-        end
-        -- Flip NPC to hostile toward the player and teleport adjacent.
+        local intensity = action.intensity or 'strike'
         local ok, err = pcall(function()
-            local instigator = df.unit.find(action.instigator_id)
-            local target     = df.unit.find(action.target_id)
-            if instigator and target then
-                -- Mark NPC hostile; in both fort + adventure mode this triggers
-                -- combat AI toward enemies of the NPC's civ.
-                instigator.flags1.active_invader = true
-                instigator.flags2.visitor        = false
-                instigator.flags2.visitor_uninvited = true
-                -- Teleport adjacent to target so they don't have to pathfind
-                -- across a fortress to reach the player.
-                dfhack.units.teleport(instigator, target.pos)
-                dfhack.gui.showAnnouncement(
-                    (original_data.npc_name or 'A dwarf') .. ' attacks!',
-                    COLOR_RED, true
-                )
+            -- Real hostility setup — works in both fort and adventure mode.
+            -- 1. Strip civ affiliation so vanilla AI treats player as enemy.
+            npc.civ_id               = -1
+            -- 2. Flag as invader (combat AI will engage nearest non-hostile).
+            npc.flags1.active_invader = true
+            npc.flags2.visitor        = false
+            npc.flags2.visitor_uninvited = true
+            -- 3. Drop any friendly relations
+            pcall(function() npc.relationship_ids:resize(0) end)
+            -- 4. Add a hate-link general_ref so DF's AI knows who to target.
+            local ref = df.general_ref_unit_attackerst:new()
+            ref.unit_id = tonumber(player.id) or 0
+            npc.general_refs:insert('#', ref)
+            -- 5. Clear any current job so the combat AI takes over immediately.
+            if npc.job.current_job then
+                dfhack.job.removeJob(npc.job.current_job)
             end
+            -- 6. Teleport adjacent to guarantee they can see the player.
+            dfhack.units.teleport(npc, player.pos)
+            -- 7. Point the NPC's facing at the player.
+            npc.facing_direction = 0  -- will re-target on next tick
         end)
         if not ok then
-            write_replan(original_data, 'Could not initiate brawl: ' .. tostring(err))
+            dfhack.printerr('[dfai] initiate_brawl err: ' .. tostring(err))
         end
+        local verb = intensity == 'kill' and 'lunges with lethal intent' or
+                     intensity == 'shove' and 'shoves you back' or
+                     'attacks'
+        dfhack.gui.showAnnouncement(
+            (original_data.npc_name or 'A dwarf') .. ' ' .. verb .. '!',
+            COLOR_LIGHTRED, true
+        )
+        -- Ripple: trigger witness reactions for nearby NPCs.
+        pcall(function()
+            local cascade = reqscript('dfai/cascade')
+            cascade.trigger(player.pos, tonumber(npc.id),
+                (original_data.npc_name or 'Someone') .. ' attacks the player')
+        end)
+
+    elseif atype == 'flee' then
+        local npc    = get_npc_unit(original_data)
+        local player = get_player_unit()
+        if not npc then return end
+        pcall(function()
+            -- Real flee: teleport away from player + set retreat flag + speed boost.
+            if player and player.pos then
+                local away_x = npc.pos.x + (npc.pos.x - player.pos.x) * 5
+                local away_y = npc.pos.y + (npc.pos.y - player.pos.y) * 5
+                -- Keep on same z level, clamp to reasonable map range.
+                local dest = {
+                    x = math.max(1, math.min(200, away_x)),
+                    y = math.max(1, math.min(200, away_y)),
+                    z = npc.pos.z,
+                }
+                dfhack.units.teleport(npc, dest)
+            end
+            npc.status.retreat_status = 1
+            npc.flags3.dangerous_terrain = false
+        end)
+        dfhack.gui.showAnnouncement(
+            (original_data.npc_name or 'Someone') .. ' flees in terror!',
+            COLOR_YELLOW, true)
+        -- Panic spreads: others nearby get a witness reaction too.
+        pcall(function()
+            local cascade = reqscript('dfai/cascade')
+            if player and player.pos then
+                cascade.trigger(player.pos, tonumber(npc.id),
+                    (original_data.npc_name or 'Someone') .. ' flees from the player in terror')
+            end
+        end)
 
     elseif atype == 'call_guards' then
         local reason = action.reason or 'a disturbance'
@@ -95,6 +161,17 @@ function execute(action, original_data)
             (original_data.npc_name or 'Someone') .. ' shouts for the guard: "' .. reason .. '!"',
             COLOR_LIGHTRED, true
         )
+        -- The shout alerts everyone nearby — cascade witness reactions.
+        pcall(function()
+            local cascade = reqscript('dfai/cascade')
+            local player = get_player_unit()
+            if player and player.pos then
+                cascade.trigger(player.pos,
+                    tonumber((get_npc_unit(original_data) or {}).id) or -1,
+                    (original_data.npc_name or 'Someone')
+                        .. ' shouts for the guards: ' .. reason)
+            end
+        end)
 
     elseif atype == 'issue_threat' then
         local threat = action.threat or 'Consequences will follow.'
@@ -122,31 +199,19 @@ function execute(action, original_data)
             COLOR_LIGHTCYAN, true
         )
 
-    elseif atype == 'flee' then
-        if not unit_alive(action.unit_id) then return end
-        -- Mark unit as fleeing via panic flag
-        local ok, err = pcall(function()
-            local unit = df.unit.find(action.unit_id)
-            unit.status.retreat_status = 1
-        end)
-        if not ok then
-            dfhack.printerr('[dfai] flee action error: ' .. tostring(err))
-        end
-
     elseif atype == 'modify_mood' then
-        if not unit_alive(action.unit_id) then return end
+        local npc = get_npc_unit(original_data)
+        if not npc then return end
         local ok, err = pcall(function()
-            local unit = df.unit.find(action.unit_id)
             local delta = math.max(-1000, math.min(1000, action.stress_delta or 0))
-            unit.status.current_soul.personality.stress_level =
-                (unit.status.current_soul.personality.stress_level or 0) + delta
+            npc.status.current_soul.personality.stress_level =
+                (npc.status.current_soul.personality.stress_level or 0) + delta
         end)
         if not ok then
             dfhack.printerr('[dfai] modify_mood error: ' .. tostring(err))
         end
 
     elseif atype == 'public_rant' then
-        if not unit_alive(action.unit_id) then return end
         dfhack.gui.showAnnouncement(
             (original_data.npc_name or 'A dwarf') .. ' rants: ' .. (action.topic or '...'),
             COLOR_RED, true
