@@ -190,9 +190,13 @@ def build_system_prompt(
 
     # 9. Theory of You — who the player character is  (from world_state.lua)
     interlocutor = ctx.get("interlocutor_description", "")
-    if interlocutor:
+    opinion_text = ctx.get("player_opinion_text", "")
+    if interlocutor or opinion_text:
         lines.append("## Who You Are Speaking To")
-        lines.append(interlocutor)
+        if interlocutor:
+            lines.append(interlocutor)
+        if opinion_text:
+            lines.append(opinion_text)
         lines.append("")
 
     # 10. System note — injected by action_executor for replan contexts,
@@ -203,8 +207,14 @@ def build_system_prompt(
         lines.append(system_note)
         lines.append("")
 
-    # 11. Closing instruction
+    # 11. Closing instruction + action guidance
     lines.append("Respond only as this character. Do not break character or mention game mechanics.")
+    lines.append("")
+    lines.append("## Action Guidance")
+    lines.append("Every reply returns a structured action. Use `opinion_delta` whenever the player said something meaningful:")
+    lines.append("  -10 deeply insulted or threatened · -3 annoyed · 0 unremarkable · +3 pleased · +10 genuinely moved or befriended.")
+    lines.append("Use `modify_mood` with a positive stress_delta (100–500) if the exchange was upsetting, or a negative one (-100 to -500) if it was a real comfort.")
+    lines.append("For most turns, default to `opinion_delta` with delta near 0 rather than `none`, so relationships accumulate.")
     return "\n".join(lines)
 
 

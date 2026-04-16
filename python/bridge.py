@@ -124,6 +124,59 @@ class ContextHandler(FileSystemEventHandler):
         chroma_dir: str = cfg.get("memory", {}).get("chroma_dir", "/home/nemoclaw/dwarf-ai/chroma")
         self._episodic = EpisodicMemory(chroma_dir=chroma_dir)
         self._consolidator = SleepConsolidator(self._episodic)
+        # Lasting per-NPC opinion of the player (persistent across bridge restarts)
+        self._opinion_path = pathlib.Path(chroma_dir) / "opinions.json"
+        self._opinions: dict[int, int] = self._load_opinions()
+
+    def _load_opinions(self) -> dict[int, int]:
+        try:
+            if self._opinion_path.exists():
+                with open(self._opinion_path, encoding="utf-8") as f:
+                    raw = json.load(f)
+                return {int(k): int(v) for k, v in raw.items()}
+        except Exception as exc:
+            logger.warning("Could not load opinions: %s", exc)
+        return {}
+
+    def _save_opinions(self) -> None:
+        try:
+            self._opinion_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._opinion_path.with_suffix(".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({str(k): v for k, v in self._opinions.items()}, f, indent=2)
+            tmp.replace(self._opinion_path)
+        except OSError as exc:
+            logger.warning("Could not save opinions: %s", exc)
+
+    def _get_opinion(self, unit_id: int) -> int:
+        return self._opinions.get(unit_id, 0)
+
+    def _apply_opinion_delta(self, unit_id: int, delta: int, reason: str) -> None:
+        delta = max(-20, min(20, delta))
+        new_score = max(-100, min(100, self._get_opinion(unit_id) + delta))
+        self._opinions[unit_id] = new_score
+        self._save_opinions()
+        logger.info("opinion: unit=%s delta=%+d -> %+d (reason: %s)",
+                    unit_id, delta, new_score, reason[:80])
+        # Also persist the reason as a memory so it shapes future conversations
+        try:
+            self._episodic.add_event(
+                unit_id=unit_id,
+                event_text=f"My opinion of the player shifted ({delta:+d}): {reason}",
+                emotional_weight=max(40, min(90, 30 + abs(delta) * 4)),
+            )
+        except Exception as exc:
+            logger.warning("opinion memory add failed: %s", exc)
+
+    @staticmethod
+    def _opinion_to_text(score: int) -> str:
+        if score >= 30:  return "This player has earned your deep trust and warmth. Speak to them as a valued friend."
+        if score >= 10:  return "You like this player. They've been pleasant in past encounters."
+        if score >= 3:   return "You have a mildly favorable impression of this player."
+        if score <= -30: return "You strongly distrust or despise this player. Be guarded and terse, or openly hostile if your temperament allows."
+        if score <= -10: return "You dislike this player. They have offended or unsettled you before."
+        if score <= -3:  return "You have a slightly negative impression of this player."
+        return ""  # neutral — no injection
 
     def on_created(self, event: FileCreatedEvent) -> None:
         if event.is_directory:
@@ -218,6 +271,11 @@ class ContextHandler(FileSystemEventHandler):
         unit_id = ctx.get("unit_id", 0)
         player_input = ctx.get("player_input", "")
 
+        # Inject lasting opinion of player into context
+        opinion = self._get_opinion(unit_id)
+        ctx["player_opinion"] = opinion
+        ctx["player_opinion_text"] = self._opinion_to_text(opinion)
+
         # Inject relevant memories into context before building the prompt
         try:
             relevant = self._episodic.query(unit_id, player_input, top_k=3)
@@ -244,6 +302,29 @@ class ContextHandler(FileSystemEventHandler):
             history.append({"role": "model", "text": response.dialogue})
         self._histories[unit_id] = history[-8:]  # keep last 4 turns (8 messages)
 
+        # Persist this exchange to episodic memory so the NPC remembers it.
+        if response:
+            try:
+                turn_text = f'The player said: "{player_input}" — I replied: "{response.dialogue}"'
+                weight = 30
+                emo = (response.emotional_state or "").lower()
+                if emo in ("angry", "grieving", "fearful", "suspicious"):
+                    weight = 60
+                elif emo in ("joyful",):
+                    weight = 50
+                self._episodic.add_event(
+                    unit_id=unit_id, event_text=turn_text, emotional_weight=weight
+                )
+            except Exception as exc:
+                logger.warning("episodic.add_event (turn) failed for unit=%s: %s", unit_id, exc)
+
+            # Apply opinion_delta if the model emitted one.
+            act = response.action.model_dump() if response.action else {"type": "none"}
+            if act.get("type") == "opinion_delta":
+                delta  = int(act.get("delta", 0) or 0)
+                reason = str(act.get("reason", ""))
+                self._apply_opinion_delta(unit_id, delta, reason)
+
         # Write response file
         responses_dir = pathlib.Path(self._ipc["responses_dir"])
         out = {
@@ -256,7 +337,8 @@ class ContextHandler(FileSystemEventHandler):
             "timestamp": _now_iso(),
         }
         _atomic_write(responses_dir / f"{interaction_id}.json", out)
-        logger.info("[%s] dialogue written for unit=%s", interaction_id[:8], unit_id)
+        logger.info("[%s] dialogue written for unit=%s opinion=%+d",
+                    interaction_id[:8], unit_id, self._get_opinion(unit_id))
 
         self._archive(ctx)
 

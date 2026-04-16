@@ -37,7 +37,13 @@ class FleeAction(BaseModel):
 class ModifyMoodAction(BaseModel):
     type: Literal["modify_mood"]
     unit_id: int
-    stress_delta: int = Field(description="Positive = more stress, negative = relief. Max abs 1000.")
+    stress_delta: int = Field(description="Positive = more stress, negative = relief. Max abs 1000. Use when the conversation was genuinely upsetting or comforting.")
+
+
+class OpinionDeltaAction(BaseModel):
+    type: Literal["opinion_delta"]
+    delta: int = Field(description="Change to how this NPC feels about the player. -10 very insulted, -3 annoyed, 0 neutral, +3 pleased, +10 genuinely moved. Use whenever the player said something meaningful.")
+    reason: str = Field(description="Brief note on why (one short sentence) — used as a memory hook.")
 
 
 class NoAction(BaseModel):
@@ -51,6 +57,7 @@ AnyAction = Union[
     PublicRantAction,
     FleeAction,
     ModifyMoodAction,
+    OpinionDeltaAction,
     NoAction,
 ]
 
